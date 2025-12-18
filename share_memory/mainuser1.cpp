@@ -21,7 +21,6 @@ void receiver_thread(SharedBuffer* buffer) {
 }
 
 int main() {
-    // Change to 'false' for user2
     if (!init_shared_memory(true)) {
         cerr << "Initialization failed. (Make sure User 1 starts first for User 2 to join)\n";
         return 1;
