@@ -1,0 +1,4 @@
+D:/Projects/Chat-System/share_memory/cmake-build-debug/CMakeFiles/user1.dir
+D:/Projects/Chat-System/share_memory/cmake-build-debug/CMakeFiles/user2.dir
+D:/Projects/Chat-System/share_memory/cmake-build-debug/CMakeFiles/edit_cache.dir
+D:/Projects/Chat-System/share_memory/cmake-build-debug/CMakeFiles/rebuild_cache.dir
