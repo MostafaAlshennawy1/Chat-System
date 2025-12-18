@@ -5,34 +5,43 @@
 #include <thread>
 #include <string>
 #include <atomic>
+#include <chrono>
+#include "clienttt.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
 std::atomic<bool> g_running(true);
 
 void receiveMessages(SOCKET clientSocket) {
-    char buffer[1024];
+    char buffer[4096];
     int bytesReceived;
 
-    while (g_running) {
+
+    u_long mode = 1;
+    ioctlsocket(clientSocket, FIONBIO, &mode);
+
+    while (g_running.load()) {
         bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
 
         if (bytesReceived > 0) {
             buffer[bytesReceived] = '\0';
-            std::cout << "\r" << buffer << std::endl;
-            std::cout << "You: ";
-            std::flush(std::cout);
+            std::cout << "\r" << buffer << "\nYou: " << std::flush;
         }
         else if (bytesReceived == 0) {
-            std::cout << "\rServer disconnected." << std::endl;
-            g_running = false;
+            std::cout << "\r[Server] Connection closed by server.\n";
+            g_running.store(false);
             break;
         }
         else {
             int error = WSAGetLastError();
-            if (error != WSAEWOULDBLOCK) {
-                std::cerr << "\rReceive failed: " << error << std::endl;
-                g_running = false;
+            if (error == WSAEWOULDBLOCK) {
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+            else {
+                std::cerr << "\r[Error] Receive failed: " << error << "\n";
+                g_running.store(false);
                 break;
             }
         }
@@ -42,89 +51,159 @@ void receiveMessages(SOCKET clientSocket) {
 void sendMessages(SOCKET clientSocket, const std::string& username) {
     std::string message;
 
-    while (g_running) {
+    while (g_running.load()) {
         std::cout << "You: ";
-        std::getline(std::cin, message);
+        if (!std::getline(std::cin, message)) {
 
-        if (message == "/exit") {
-            g_running = false;
+            g_running.store(false);
             break;
         }
 
-        std::string fullMessage = username + ": " + message;
+
+        if (message.empty()) {
+            continue;
+        }
+
+        if (message == "/exit" || message == "/quit") {
+            g_running.store(false);
+            break;
+        }
+
+
+        std::string fullMessage;
+        if (message.substr(0, 3) == "/w ") {
+
+            fullMessage = "[PM from " + username + "] " + message.substr(3);
+        }
+        else if (message.substr(0, 6) == "/clear") {
+
+            system("cls");
+            std::cout << "Chat cleared.\n";
+            continue;
+        }
+        else {
+            fullMessage = "[" + username + "] " + message;
+        }
+
         int sendResult = send(clientSocket, fullMessage.c_str(), fullMessage.length(), 0);
         if (sendResult == SOCKET_ERROR) {
-            std::cerr << "Send failed: " << WSAGetLastError() << std::endl;
-            g_running = false;
+            int error = WSAGetLastError();
+            if (g_running.load()) {
+                std::cerr << "\r[Error] Send failed: " << error << "\n";
+                g_running.store(false);
+            }
             break;
         }
     }
 }
 
 void startClient(const std::string& serverIP, unsigned short port) {
+
     std::string username;
-    std::cout << "Enter your username: ";
-    std::getline(std::cin, username);
+    while (username.empty()) {
+        std::cout << "Enter your username: ";
+        std::getline(std::cin, username);
+
+        if (username.empty()) {
+            std::cout << "Username cannot be empty!\n";
+        }
+        else if (username.length() > 20) {
+            std::cout << "Username too long (max 20 characters)!\n";
+            username.clear();
+        }
+    }
+
 
     WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        std::cerr << "WSAStartup failed." << std::endl;
+    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (result != 0) {
+        std::cerr << "WSAStartup failed: " << result << std::endl;
         return;
     }
 
-    SOCKET clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    SOCKET clientSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (clientSocket == INVALID_SOCKET) {
         std::cerr << "Socket creation failed: " << WSAGetLastError() << std::endl;
         WSACleanup();
         return;
     }
 
-    sockaddr_in serverAddr{};
+
+    sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(port);
-    serverAddr.sin_addr.s_addr = inet_addr(serverIP.c_str());
 
-    if (serverAddr.sin_addr.s_addr == INADDR_NONE) {
-        std::cerr << "Invalid IP address: " << serverIP << std::endl;
+
+    if (inet_pton(AF_INET, serverIP.c_str(), &serverAddr.sin_addr) != 1) {
+
+        serverAddr.sin_addr.s_addr = inet_addr(serverIP.c_str());
+        if (serverAddr.sin_addr.s_addr == INADDR_NONE) {
+            std::cerr << "Invalid IP address format: " << serverIP << std::endl;
+            closesocket(clientSocket);
+            WSACleanup();
+            return;
+        }
+    }
+
+
+    std::cout << "Connecting to " << serverIP << ":" << port << "...\n";
+
+    result = connect(clientSocket, (sockaddr*)&serverAddr, sizeof(serverAddr));
+    if (result == SOCKET_ERROR) {
+        int error = WSAGetLastError();
+        std::cerr << "Connection failed: " << error << std::endl;
+
+        
+        if (error == WSAECONNREFUSED) {
+            std::cerr << "Server refused the connection. Make sure the server is running.\n";
+        }
+        else if (error == WSAETIMEDOUT) {
+            std::cerr << "Connection timed out.\n";
+        }
+
         closesocket(clientSocket);
         WSACleanup();
         return;
     }
 
-    std::cout << "Connecting to server " << serverIP << ":" << port << "..." << std::endl;
-    if (connect(clientSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
-        std::cerr << "Connection failed: " << WSAGetLastError() << std::endl;
-        closesocket(clientSocket);
-        WSACleanup();
-        return;
-    }
+    std::cout << "\n=== Connected successfully! ===\n";
+    std::cout << "Username: " << username << "\n";
+    std::cout << "Server: " << serverIP << ":" << port << "\n";
+    std::cout << "================================\n";
+    std::cout << "Available commands:\n";
+    std::cout << "  /exit or /quit - Leave chat\n";
+    std::cout << "  /w [user] [msg] - Private message\n";
+    std::cout << "  /clear - Clear screen\n";
+    std::cout << "================================\n\n";
 
-    std::cout << "Connected to server successfully!" << std::endl;
-    std::cout << "Type your messages (type '/exit' to quit)" << std::endl;
-    std::cout << "----------------------------------------" << std::endl;
 
-    // إرسال رسالة دخول
-    std::string joinMessage = username + " has joined the chat!";
+    std::string joinMessage = "[System] " + username + " has joined the chat!";
     send(clientSocket, joinMessage.c_str(), joinMessage.length(), 0);
 
-    // إنشاء thread لاستقبال الرسائل
-    std::thread receiverThread(receiveMessages, clientSocket);
 
-    // thread لإرسال الرسائل
+    std::thread receiverThread(receiveMessages, clientSocket);
+    receiverThread.detach();
+
+
     sendMessages(clientSocket, username);
 
-    // التأكد من إيقاف thread الاستقبال
-    g_running = false;
-    shutdown(clientSocket, SD_BOTH);
-    if (receiverThread.joinable()) {
-        receiverThread.join();
-    }
 
-    std::string leaveMessage = username + " has left the chat.";
+    g_running.store(false);
+
+
+    std::string leaveMessage = "[System] " + username + " has left the chat.";
     send(clientSocket, leaveMessage.c_str(), leaveMessage.length(), 0);
+
+
+    shutdown(clientSocket, SD_BOTH);
+
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     closesocket(clientSocket);
     WSACleanup();
 
-    std::cout << "Disconnected from server." << std::endl;
+    std::cout << "\nDisconnected from server. Press Enter to exit...\n";
+    std::cin.get();
 }
