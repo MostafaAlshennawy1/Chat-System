@@ -1,0 +1,4 @@
+D:/Projects/Chat-System/finalClientGui/cmake-build-debug/CMakeFiles/chatConsole.dir
+D:/Projects/Chat-System/finalClientGui/cmake-build-debug/CMakeFiles/chatGUI.dir
+D:/Projects/Chat-System/finalClientGui/cmake-build-debug/CMakeFiles/edit_cache.dir
+D:/Projects/Chat-System/finalClientGui/cmake-build-debug/CMakeFiles/rebuild_cache.dir
